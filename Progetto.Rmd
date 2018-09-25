@@ -1,0 +1,1578 @@
+---
+title: "Final Project"
+author: "Davide Aureli"
+date: "25 Luglio 2018"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Library
+
+```{r message=FALSE}
+library(R2jags)
+library(lattice)
+library(dplyr)
+library(knitr)
+library(dplyr)
+library(igraph)
+library(plotrix)
+```
+
+```{r}
+set.seed(972006)
+```
+
+#Introduction
+
+Within this project we will try to analyze the results of the last football season of *Serie A season 2017-2018*, through the use of statistical tools such as **hierarchical Bayesian models**. 
+
+The data were taken from the site http://www.football-data.co.uk/mmz4281/1718/E0.csv
+
+The work consists of four phases, each of which will be reserved a chapter:
+
+1)Data observation and analysis on their distribution.
+
+2)Construction of the Bayesian hierarchical models, through which we will study the     trends of the offensive and defensive intensity of all the teams that took part in the championship in the 17/18 season.
+
+3)Construction of a frequentist model and comparison between the two approaches.
+
+4)Evaluation of the predictive performance of the model during the same season, using a betting strategy by applying these forecasts to bookmakers' odds.
+
+#Data Analysis
+
+```{r}
+#Loading data 
+Serie_A <- read.csv("C:/Users/user/Desktop/Tardella/Dati_Serie_A.csv")
+```
+
+Our initial analysis will focus on the 380 league matches completed by the 20 teams, considering the final result of the individual challenges. 
+
+For this reason we select the variables: "HomeTeam" "AwayTeam" "FTHG" "FTAG"
+
+*Legenda*
+
+**HomeTeam** = Home Team
+
+**AwayTeam** = Away Team
+
+**FTHG** = Full Time Home Team Goals
+
+**FTAG** = Full Time Away Team Goals
+
+```{r}
+#Selecting variables
+new_data = Serie_A[,c(3:6)]
+
+#At first glance of our dataset
+kable(new_data[1:6,])
+
+#Transformation of data from categorical string to categorical numerical
+new_data$HomeTeam <- as.numeric(new_data$HomeTeam)
+new_data$AwayTeam <- as.numeric(new_data$AwayTeam)
+
+#Select the goal columns at home and away from home
+home_g <- new_data$FTHG
+away_g <- new_data$FTAG
+
+#Selected the number of matches in a season (380) and the number of teams (20) 
+match <- length(new_data$HomeTeam)
+team <- length(unique(new_data$HomeTeam))
+```
+
+To model the distribution of the number of goals in sport events involving two competing teams, it’s possible to use the **Poisson distribution**, defined as follows:
+
+
+$$X \sim Pois(\theta)=\frac{\theta^{k}}{k!}e^{-\theta}$$
+
+
+Let’s analyze the behaviour of the observed data, in order to understand if in our case the Poisson distribution is a good choice.
+
+We can start by observing the average goals scored during the championship for each match.
+
+```{r}
+#  Bar Plot
+
+#tot goal per match
+tot_gol <- home_g+away_g
+counts <- table(tot_gol)
+
+#Average of goals in a single match
+avg_goal = mean(tot_gol)
+
+barplot(table(tot_gol)/match, col =rgb(0.4,0.4,0,0.3), space=0.06,main="Distribution of total goals per game",xlab="Number of Total Goals per game",ylab="Relative Frequencies",lwd=3)
+points( dpois(0:8, lambda=avg_goal ), type="b",lwd=2,col="dodgerblue4")
+legend("topright",legend = c("Pois Distribution"), 
+       lty=2,lwd=2)
+#Avg Goals
+avg_goal
+```
+
+Moreover we can focus on the differences between the **Home goal** VS the **Away goal**:
+
+```{r}
+aa <-table(home_g)
+bb <- table(away_g)
+aa <- as.matrix(aa)
+bb <- as.matrix(bb)
+bb= rbind(bb,0)
+cc <- cbind(aa,bb)
+
+col_1 <- rgb(0,0,1)
+col_2 <- rgb(1,0,0)
+
+barplot(t(cc), las=2, beside=T, col=c("orchid","dodgerblue4"), main="Comparison Home_G and Away_G",legend.text = c("Home Goal","Away Goal"), args.legend = list(x = "topright",col=c("orchid","dodgerblue4")))
+
+```
+
+
+As we observed previously for total goals in a single game, we can now see how both home and away goals are distributed, using the Poisson distribution with a parameter equal to the average at home and away.
+
+Analyzing them, **overlapping the Poisson distribution**:
+
+```{r}
+#tot goal per match
+tot_gol_home <- home_g
+tot_gol_away <- away_g
+
+
+
+#Average of goals in a single match both for away and home team
+avg_goal_h = mean(tot_gol_home)
+avg_goal_a = mean(tot_gol_away)
+
+par(mfrow=c(1,2))
+
+barplot(table(tot_gol_home)/match, col ="orchid", space=0.06,main="Distro Home Goals",xlab="Home Goals",ylab="Relative Frequencies",lwd=3,ylim=c(0,0.35))
+points( dpois(0:8, lambda=avg_goal_h ), type="b",lwd=2,col="dodgerblue4")
+legend("topright",legend = c("D_Pois"), 
+       lty=2,lwd=2)
+
+barplot(table(tot_gol_away)/match, col ="dodgerblue4", space=0.06,main="Distro Away Goals",xlab="Away Goals",ylab="Relative Frequencies",lwd=3,ylim=c(0,0.38))
+points( dpois(0:8, lambda=avg_goal_a ), type="b",lwd=2,col="orchid")
+legend("topright",legend = c("D_Pois"), 
+       lty=2,lwd=2)
+
+par(mfrow=c(1,1))
+```
+
+In both the cases the **Poisson distribution seems to fit well** with the observed data.
+For the goal scored by the home team we use as parameter for the Poisson distribution the mean of the goal scored by all the home teams in the 2017-2018 season. The same reasoning we use for the away team.
+
+In fact for the Poisson distribution is valide the following statement:
+\[
+E(X)=\theta
+\]
+where $X\sim Pois(\theta)$
+
+```{r}
+c("Home team" = mean(new_data$FTHG), "Away team" = mean(new_data$FTAG))
+```
+
+Observing the goals scored by the home teams and those who played away, we understand how on average the former express a **more offensive game**. It is useful to focus on the percentages of the results of the teams that played at home and away.
+
+```{r}
+#Creation of a vector taking the track of the results for each match, for us 1 = Home Victory, 2 = Away Victory , 3 = Draw
+partite_fin <-NULL
+
+for (partita in 1:nrow(new_data)){
+  #print(partita)
+  if (new_data[partita,3] > new_data[partita,4]){
+    partite_fin[partita] <- 1
+  }
+  if (new_data[partita,3] < new_data[partita,4]){
+    partite_fin[partita] <- 2
+  }
+  {
+  if (new_data[partita,3] == new_data[partita,4]){
+    partite_fin[partita] <- 3
+  }
+  }
+}
+
+# 3D Exploded Pie Chart
+
+slices <- round((table(partite_fin)*100/match),2)
+
+#Labels Creation
+a <- paste0("Home ",slices[1],"%")
+b <- paste0("Away ",slices[2],"%")
+c <- paste0("Draw ",slices[3],"%")
+
+lbls <- c(a, b, c)
+#Plot
+pie3D(slices,labels=lbls,explode=0.05,main="Percentage victories at home and away")
+
+```
+
+###Home Effect
+
+Observing the average goals scored at home and away and observing the pie chart in which we highlight the percentages of victory at home and away, we can focus our attention on the **home factor**.
+
+The field factor, defined in the project as "home", which represents the existence of an **advantage for those who play at home**, in football (*Pollard, 2008*).
+
+There remains to be clarified what are the precise causes and the way in which they **influence (positively)** the performance of a team playing in their home ground.
+
+Several researches since the 80s have underlined a series of effects and the interaction between them. We list some of the most relevant:
+
+- *Public*: the most famous and discussed effect, it is not yet clear whether it gives advantage to those who are at home or disadvantage to the host, nor if the number of spectators is in fact important.
+
+- *Arbitrage*: it is easily deducible from the statistics of cards and penalties as the home team is generally favored, but this could only be an effect of the more effective tactics of those playing at home, although the public can also have a psychological influence.
+
+- *Travel*: the distance traveled from the visiting team can slightly lighten the physical state. This is why in the so-called derby it is said that the field factor is lower.
+
+- *Psychological factors*: the home team plays on familiar ground and in a familiar environment. 
+
+- *Tactical approach*: it is known to many as the teams at home tend to attack more for making a good impression in front of their public.
+
+#Model Structure
+
+The search for the most suitable models to describe **sports data** is a very popular topic and much literature has been produced in this sense since the '70s.From a statistical point of view, many have found this topic very stimulating because it has some interesting aspects also of an economic nature (*Baio & Blangiardo, 2010*). 
+
+A first question was the search for the right distribution associated to the number of goals scored in a single game by the two teams, because these quantities we deal with, as well as being all we need to know the result of a meeting, they are generally small and not negative numbers, also called *low counts*.
+
+The first models (*Pollard et al., 1977*) proposed the Binomial or the Negative Binomial, but afterwards the **distribution of Poisson** was globally accepted; this is the reason for the first plot in the Introduction. To simplify things, on the basis of empirical studies that showed the almost nullity of the correlation between goals scored by the two teams in the field, *Maher* (1982) hypothesized that the **two Poissonian variables were independent** and more in particular that both were the product of the strength offensive of a team and the defensive ability of its adversary.
+
+In the following years, relatively low but non-zero correlation levels were shown between the two quantities (*Karlis & Ntzoufras, 2000*), so changes were proposed to Maher's model as corrective factors to improve its predictive performance. 
+
+In the early 2000s, various authors (*Karlis & Ntzoufras, 2003*) proposed the use of a more complete attribution to the **Poisson bivariata**, which allows the introduction of the covariance between goals scored by the two opposing teams, all in a Bayesian context. 
+
+Following *Baio and Blangiardo (2010)* have theorized **the Bayesian hierarchical model** showing that with such a structure there is no need for additional parameters for the covariance between goals since assuming **two Poissonian variables conditionally independent** for the goals scored, the correlation is considered at a higher level of the hierarchical structure.
+
+The conditionally independence of the two Poisson variables could be formalized in the following formula:
+
+\[
+Y_{gj} \mid \theta_{gj} \sim Poisson(\theta_{gj})
+\]
+
+and ${j =1,2}$ represent the two teams that we are observing in a match.
+
+Where $Y_{gj}$ is the number of goals we can observe in the game $g-th$ between the team $j = 1$ and $j = 2$.
+
+
+Let's focus now on the parameter $\theta_{gj}$: it's the **realization intensity**. It's possible to understand the importance of this parameter considering that, for a Poisson distribution, we have that:
+
+\[
+\mathbb{E}\big[Pois(\lambda)\big] = \lambda
+\]
+
+*But.. from what the realization intensity of a team is influenced by ?*
+
+It's reasonable to think that it's influenced by:
+
+* **attack potential** of the team ($alpha_{j}$)
+* **defense potential** of the opponent team ($beta_{i}$)
+* **home factor** ($\delta$)
+
+
+Now, we are able to construct our model taking inspiration from this last paper, trying to represent the hierarchical Bayesian model structure through the DAG.
+
+```{r}
+#Representation of the DAG
+
+graph <- make_empty_graph(directed=T)
+graph <- graph + vertex(color= 'lightblue',name=expression(Y_g1))+vertex(color= 'lightblue',name=expression(Y_g2))+vertex(color= 'lightblue',name=expression(theta_g1))+vertex(color= 'lightblue',name=expression(theta_g2))+vertex(color= 'lightblue',name="home")+vertex(color= 'lightblue',name="att_h(g)")+vertex(color= 'lightblue',name="def_a(g)")+vertex(color= 'lightblue',name="att_a(g)")+vertex(color= 'lightblue',name="def_h(g)")
+
+
+graph <- graph + edge(3,1)+ edge(4,2)+ edge(5,3)+ edge(6,3)+ edge(7,3)+ edge(8,4)+ edge(9,4)
+l <- layout_with_sugiyama(graph, layers = NULL, hgap = 1, vgap = 1,
+  maxiter = 100, weights = NULL, attributes = c("default", "all", "none"))
+
+plot(graph, layout=l$layout,edge.color='black', main="DAG for Model_1", vertex.size=50, edge.arrow.size=0.9)
+```
+
+In this hierarchical model the goals of the two opponent teams are explained using two levels. We've to show how $\theta_{g(1)}$ and $\theta_{g(2)}$ are composed.
+
+The way used to explain **the realization intensity**, according with variables shown before, is the following one:
+
+\[
+\theta_{x,j,i,t} = \exp(\delta+\alpha_{i,t}+\beta_{j,t})
+\]
+
+\[
+\theta_{y,j,i,t} = \exp(\alpha_{j,t}+\beta_{i,t})
+\]
+
+So that our parameters to be estimated are $\alpha$, $\beta$ and *home* for each team.
+**The log function is used in order to remap the value of the linear combination of the parameters in the same space of $\theta$'s domain**.
+
+Regarding the parameters of interest we used the following **priors**:
+
+* $a \sim N(0, \dfrac{1}{0.01})$
+
+* $b \sim N(0, \dfrac{1}{0.01})$
+
+* $home \sim N(0, \dfrac{1}{0.001})$
+
+Since no information is available, normal prior distibutions for the parameters with mean zero and large variance are used to express our idea that is **skeptical but flexible**.
+
+In order to run the model in a Bayesian framework, we'll use *Jags*. It's important to underline that in the Jags code when some Normal prior distributions are initialized, the second parameters is the **precision**, instead of the variance. Remember that the precision $\tau$ is:
+
+\[
+\tau = \dfrac{1}{\sigma^2}
+\]
+
+Now it's important to initialize the parameters for the **Model_1**
+
+# Model 1
+
+We initialize the input parameters, which then will be irrelevant for the behavior implemented by the MCMC(Monte Carlo Markov Chain).
+
+So the attack and defense vectors for the 20 teams have to be initialized remembering that within our model due to the issue of **replicability** we choose to impose the attack of the first team and the defense of the first team equal to the sum of the values of the remaining 19 teams both for attack and for defense **to get a unique measurement of the relationships between the teams**.
+
+Also for the attack we will have positive values that indicate a team with a good vein of realization while vice versa no, for the defense the meaning is contrary we will have negative values that indicate a good defense and positive a colander ... Everything will be clearer by observing model.
+
+```{r}
+# Initialization
+
+soccer.init = list(list("home" = 0.7, "a" = c(NA,rep(0.2, team-1)), "d" = c(NA,rep(0.2, team-1))), list("home" = 0.7, "a" = c(NA,rep(0.2, team-1)), "d" = c(NA,rep(0.2, team-1))))
+
+# PARAMETERS OF INTEREST
+soccer.param = c("a", "d", "home")
+```
+
+Here we create the data in the structure that requires *JAGS*.
+
+```{r}
+soccer.data = list(x = new_data$FTHG, y = new_data$FTAG, number_match = match, number_teams = team, ht = new_data$HomeTeam, at = new_data$AwayTeam)
+```
+
+The Jags code is the following one:
+
+```{r eval=FALSE}
+'''
+model{
+  for (i in 1:number_match){    
+    # stochastic component
+    x[i]~dpois(lambda1[i])       
+    y[i]~dpois(lambda2[i])       
+    # link and linear predictor
+    log(lambda1[i])<-  home + a[ ht[i] ] + d[ at[i] ]
+    log(lambda2[i])<-  a[ at[i] ] + d[ ht[i] ]
+  }
+  # STZ constraints     
+  a[1]<-  -sum( a[2:20] )
+  d[1]<-  -sum( d[2:20] )
+  #
+
+  # prior distributions
+  home~dnorm(0,0.001)
+
+  for (i in 2:number_teams){
+    a[i]~dnorm(0,0.01)
+    d[i]~dnorm(0,0.01)
+  }
+  
+}
+'''
+```
+
+Here we load the model and we can run it.
+With the variable *model_1* we store all the output values of our chains.
+
+```{r}
+model_1 = jags(data = soccer.data, inits = soccer.init,        
+                parameters.to.save = soccer.param,          
+                model.file = "C:/Users/user/Desktop/Tardella/model_1.txt",
+                n.chains = 2,                         
+                n.iter = 50000, n.burnin = 25000)
+
+```
+
+Before seeing what we got let's discuss on the parameters used in the model. In order to use the *Jags* environment we use the *jags* function. 
+
+In details the following parameters are setted:
+
+* **number of iterations**: 50000. This parameter is the total lenght of the Markov Chain
+
+* **number of chains**: 2
+
+* **burn-in**: 25000. It's the number of iterations to discard at the beginning
+
+* **n.thin**: 25. It's the thinning rate and it must be a positive integer 
+
+Now we can print the results of our model.
+
+```{r}
+mm1 <- as.mcmc(model_1)
+summary(mm1)
+```
+
+####Interpretation of the Summary
+
+The **summary** method for the **mcmc** class provides numeric summaries of the *MCMC samples values* for each variable.
+
+The **Mean** column provides the approximation of the posterior mean of the parameter of interest.
+
+The **Standard Deviation** (SD) is the standard deviation of sampled values from the posterior. It provides information about certainty to which the value of the variable is known.
+
+The **Naive Standard Error (SE)** provides information about the standard error in estimating the posterior mean. Increasing the number of monitored iterations in the MCMC run should decrease this standard error. The "naive" standard error is the standard error of the mean, which captures simulation error of the mean rather than posterior uncertainty: $naiveSE=\frac{\sigma}{\sqrt{n}}$.
+
+We can derive this from the variance of the sample mean, that is:
+$Var(\bar{X})=Var(\frac{1}{n}\sum_{i=1}^{n}X_i)=\frac{1}{n^2}Var(\sum_{i=1}^{n}X_i)=\frac{n\sigma^2}{n^2}=\frac{\sigma^2}{n}$
+Certainly it's valid when we have an i.i.d sample but in our sample from the mcmc we are supposing the independence of the sample but **we know that autocorrelation is there**, which it will be analyzed later.
+
+The **Time-Series Standard Error (SE)**is arguably the more informative value. The time-series standard error adjusts the "naive" standard error for autocorrelation. If there is auto-correlation then each iteration does not provide an independent unit of information. In this case, the time-series SE adjusts for the non-independence of each iteration.
+
+The **Quantiles tables**  provides various quantile estimates. It defaults to useful values, but different quantiles can be specified. In particular, the 50th percentile corresponds to the median. And the 2.5 and 97.5 percentiles can be combined to form a $95\%$.
+
+Let’s see the estimated attack and defense coefficients for the Serie A teams:
+
+```{r}
+off_att <- model_1$BUGSoutput$mean$a
+super_def <- model_1$BUGSoutput$mean$d
+home_sweet <- model_1$BUGSoutput$mean$home
+  
+XY <- data.frame(cbind(levels(Serie_A$HomeTeam),off_att,super_def,home_sweet))
+colnames(XY)<- c("Team","Attack","Defense","Home")
+
+#Overview on the parameters
+kable(XY)
+
+```
+
+As we can see from **the a posteriori mean approximation**, defined as *Mean* within the summary, shows as the attack and defense parameters reflect reality. In fact the two best attacks are those of **Lazio** with 89 goals scored (att = 0.636) and then following **Juventus** with 86 goals (att= 0.576) and **Napoli** with 77 goals (0.465). While the worst is certainly **Sassuolo** team with a posteriori mean approximation related to the attack parameter of -0.519 with only 29 goals scored.
+
+As for the defense the best team is Juventus with only 24 goals conceded(def=-0.694) while the worst is Benevento with 84 goals conceded (def=0.556).
+
+As we said previously, the home value is the same for all teams, *home = 0.239*.
+
+#Diagnostic
+
+Once the approximation a posteriori of the parameters are obtained, **the convergence check is needed**. If the algorithm converges, it means it has reached its equilibrium (target) distribution and the generated sample comes from the correct target distribution. Hence, monitoring the convergence of the algorithm is essential for producing results from the posterior distribution. In order to study the convergence, plotting autocorrelation, trace plots and density plot are easy and fast tasks.
+
+
+### Traceplot
+
+Trace plots provide useful diagnostic estimation:
+
+The trace plots show the value of a variable across the monitored iteractions of the MCMC chain. Trace plots can reveal auto-correlation which reduces the information provided by each iteration. Trace plots can reveal inadequate burn-in when early. We can see whether our chain gets stuck in certain areas of the parameter space, which indicates bad mixing. If you specify to monitor multiple chains, then the trace plot will display each chain in a different colour.
+
+In particular we’ll print both the chain, the first one is the black one, while the second one is red.
+
+```{r}
+par(mfrow=c(3,2))
+log.j = as.mcmc(model_1)
+par_list <- colnames(log.j[[1]])
+for (i in 1:dim(model_1$BUGSoutput$sims.array)[3])
+{
+  plot(model_1$BUGSoutput$sims.array[,1,i], type = "l", main=paste("Traceplot",par_list[i]))
+  points(model_1$BUGSoutput$sims.array[,2,i], type = "l", col=rgb(1,0,0,0.7))
+}
+par(mfrow=c(1,1))
+```
+
+### Autocorrelation
+
+Autocorrelation calculates the autocorrelation function for the Markov chain mcmc.obj at the lags given by lags.**High autocorrelations within chains indicate slow mixing and, usually, slow convergence**. It may be useful to thin out a chain with high autocorrelations before calculating summary statistics: a thinned chain may contain most of the information, but take up less space in memory. Re-running the MCMC sampler with a different parameterization may help to reduce autocorrelation. 
+
+The lag k autocorrelation $\rho_k$ is the correlation between every draw and its k-th lag: $\rho_k=\frac{\sum_{i=1}^{n-k}(x_i-\bar{x})(x_{i+k}-\bar{x})}{\sum_{i=1}^{n}(x_i-\bar{x})^2}$. 
+
+We would expect the kth lag autocorrelation to be smaller as k increases.**If autocorrelation is still relatively high for higher values of k, this indicates high degree of correlation between our draws and slow mixing**.
+
+So it seems as though the chains have converged after the iterations.
+
+```{r}
+par(mfrow=c(3,2))
+for(i in 1:dim(model_1$BUGSoutput$sims.array)[3])
+{
+  acf_main <- acf(model_1$BUGSoutput$sims.array[,1,i], plot = F, lag.max=100)
+  plot(acf_main$lag, acf_main$acf, type='h', col = 'darkorchid',  xlab="LAG", ylab="ACF", lwd=2, main=paste("Autocorrelation of ",par_list[i]))
+}
+par(mfrow=c(1,1))
+```
+
+### Density plot
+
+Density plots summarise the posterior density for each variable estimated based on the sampling of the variable in the MCMC chains. 
+
+```{r}
+par(mfrow=c(3,1))
+densityplot(as.mcmc(model_1),layout=c(2,6),aspect="fill" )
+par(mfrow=c(1,1))
+```
+
+As it’s possible to see the posterior distributions are the same for both the analyzed chains.
+
+Now we can check the goodness of the results obtained using hypothesis tests, we report two that were used in the project.
+
+## Gelman and Rubin Convergence Diagnostic
+
+Steps (for each parameter):
+
+1. Run m >= 2 chains of length 2n from overdispersed starting values.
+
+2. Discard the first n draws in each chain.
+
+3. Calculate the within-chain and between-chain variance.
+
+4. Calculate the estimated variance of the parameter as a weighted sum of the within-chain and between-chain variance.
+
+5. Calculate the potential scale reduction factor.
+
+Within Chain Variance:
+
+$W=\frac{1}{m}\sum_{j=1}^{m}s_j^2$ where $s_j^2=\frac{1}{n-1}\sum_{i=1}^{n}(\theta_{ij}-\bar{\theta_j)^2}$. Where $s_j^2$ is just the formula for the variance of the j-th chain. W is then just the mean of the variances of each chain. W likely underestimates the true variance of the stationary distribution since our chains have probably not reached all the points of the stationary distribution.
+
+*Between Chain Variance*:
+
+$B=\frac{n}{m-1}\sum_{j=1}^{m}(\bar{\theta_j}-\bar{\bar \theta})^2$ where $\bar{\bar \theta}=\frac{1}{m}\sum_{j=1}^{m}\bar{\theta_j}$, this is the variance of the chain means multiplied by n because each chain is based on n draws.
+
+*Estimated Variance*:
+
+We can then estimate the variance of the stationary distribution as a weighted average of W and B. $\hat{Var}(\theta)=(1-\frac{1}{n})W+\frac{1}{n}B$. Because of overdispersion of the starting values, this overestimates the true variance.
+
+*Potential Scale Reduction Factor*:
+
+The potential scale reduction factor is: $\hat R=\sqrt{\frac{\hat{Var}(\theta)}{W}}$. When $\hat{R}$ is high (perhaps greater than 1.1 or 1.2), then we should run our chains out longer to improve convergence to the stationary distribution.
+If we have more than one parameter, then we need to calculate the potential scale reduction factor for each parameter.
+
+We should run our chains out long enough so that all the potential scale reduction factors are small enough.
+
+The results of the Gelman and Rubin diagnostic gives us the median potential scale reduction factor and its 97.5% quantile (the psrf is estimated with uncertainty because our chain lengths are finite).
+
+```{r}
+log.j = as.mcmc(model_1)
+colnames(log.j[[1]])
+gelman.plot(log.j)
+```
+
+As it’s possible to see for almost the totality of the parameters there is a convergence in the last iterations.
+
+The values of the shrink factor for the parameters is, in all the cases, not bigger **1.1** or **1.2**.
+
+## Geweke -Brooks Plot
+
+The Geweke diagnostic takes two non overlapping parts (usually the first 0.1 and last 0.5 proportions) of the Markov chain and compares the means of both parts, using a difference of means test to see if the two parts of the chain are from the same distribution (*null hypothesis*).
+
+The test statistic is a standard Z-score with the standard errors adjusted for autocorrelation.
+
+$Z= \frac{X_{1} - X_{2}}{se_{time series}}$ where X_{1} is the mean of the 10% of the sample(after eliminating the bur-in part) while  X_{2} represents the mean of the last 50%.
+
+**A large number of Z-scores falling outside this interval suggests possible convergence failure**.
+
+```{r}
+geweke.plot(log.j)
+```
+
+Also in this case the diagnostic of the model seems to give us good results.
+
+#HPD - Highest Posterior Density Intervals
+
+A $(1-\alpha)\%$ HPD interval is a region that satisfies the following two conditions:
+
+1.The posterior probability of that region is $(1-\alpha)\%$.
+
+2.The minimum density of any point within that region is equal to or larger than the density of any point outside that region. So it's possible to say that HPD interval is the collection of most likely values of the parameters.
+
+**THE HPD is an interval only when the parameter is unidimensional and the posterior is unimodal.**
+
+Observing the values of the HPD we will notice that they will generate narrower intervals than those of the equal tail that are present in the model summary.
+
+Highest Posterior Density (HPD) intervals for $90$, $95$, and $99$ percent intervals assuming that the data is not severely multimodal, as we have seen in the *density plots*.
+
+```{r}
+list(int90 = HPDinterval(mm1[[1]], prob=.90), int95= HPDinterval(mm1[[1]], prob=.95), int99= HPDinterval(mm1[[1]], prob=.99))
+```
+
+By observing the values we have obtained for the various intervals, we note that the interval always includes the value $0$ within it, mirroring in a certain way the priority we have chosen in the initial model, certainly now we will have more information on the distribution of our parameters.
+
+Now we can evaluate the **posterior uncertainty**:
+
+```{r}
+xx <- NULL
+for(i in 1:dim(model_1$BUGSoutput$sims.array)[3])
+{
+H_intervallo <- HPDinterval(mm1[[1]], prob=.90)[i,]
+post_uncc <- unname((H_intervallo[2]-H_intervallo[1])/(max(model_1$BUGSoutput$sims.array[,1,i])-min(model_1$BUGSoutput$sims.array[,1,i])))
+
+xx[i] <- post_uncc
+}
+
+posss <- which.max(xx)
+MINN <- which.min(xx[c(1:40,42)])
+
+
+par_list[MINN]
+c("Diff" = unname(abs(HPDinterval(mm1[[1]], prob=.90)[MINN,][2] - HPDinterval(mm1[[1]], prob=.90)[MINN,][1])))
+
+par_list[posss]
+c("Diff" = unname(abs(HPDinterval(mm1[[1]], prob=.90)[posss,][2] - HPDinterval(mm1[[1]], prob=.90)[posss,][1])))
+
+```
+
+Let's take a look:
+
+In the first graph we observe the parameter with **less uncertainty**.
+
+```{r}
+plot(density(model_1$BUGSoutput$sims.array[,,MINN][,1]), col='black', lwd=3, main="HPD for less uncertainty chain a[1]",xlim=c(-1,+1))
+abline(v=HPDinterval(mm1[[1]], prob=.90)[MINN,], col='green', lwd=2)
+abline(v=HPDinterval(mm1[[1]], prob=.95)[MINN,], col='orange', lwd=2)
+abline(v=HPDinterval(mm1[[1]], prob=.99)[MINN,], col='blue', lwd=2)
+legend(x="topleft", legend=c("90","95","99"), col=c("green","orange","blue"), bty = 'n', lwd=4, cex=1.2)
+```
+
+In the second we focus on the parameter **with greater uncertainty**.
+
+```{r}
+plot(density(model_1$BUGSoutput$sims.array[,,30][,1]), col='black', lwd=3, main="HPD for most uncertain chain d[10]")
+abline(v=HPDinterval(mm1[[1]], prob=.90)[posss,], col='green', lwd=2)
+abline(v=HPDinterval(mm1[[1]], prob=.95)[posss,], col='orange', lwd=2)
+abline(v=HPDinterval(mm1[[1]], prob=.99)[posss,], col='blue', lwd=2)
+legend(x="topleft", legend=c("90","95","99"), col=c("green","orange","blue"), bty = 'n', lwd=4, cex=1.2)
+```
+
+### ESS - Effective Sample Size
+
+$n_{eff}$  is a function of the correlation between observations in the sample :
+ 
+$n_{eff}= \frac{n}{1+2 \sum_{k=1}^{n}\rho_{k}}$
+
+```{r}
+lapply(log.j,effectiveSize)
+```
+
+# Data Generated 
+
+Until now we have evaluated the behaviour of our model assuming that the data were derived from a Poisson, but we can check our model. In fact, by generating the values of attack and defense of the 20 teams in the league taking them as true values we try to observe the behaviour of the model when actually the data were generated by a Poisson. 
+
+To simulate the possible championship we need a calendar and to create it we used the **round robin algorithm** in which we could also specify the number of championship rounds to run.
+
+```{r}
+#ROUND ROBIN Algorithm
+
+# n is the number of teams
+n <- 20
+teams <- 1:n
+
+# incontri is the number of rounds for each teams
+# 19 is the number of match that every team has to do in order to match all the other teams once
+
+incontri <- 19
+
+rounds <- list()
+for( i in 1:incontri){
+  round <- 
+    data.frame(
+      round = i,
+      team1 = teams[1:(n/2)], 
+      team2 = rev(teams)[1:(n/2)])
+  rounds[[i]] <- round
+  teams <- c( teams[1],  last(teams), head(teams[-1],-1) ) 
+}
+
+calendario <- bind_rows(rounds)
+
+#Creating the second part of a league inverting the second with the first team in a match
+
+calendario <- calendario[,2:3]
+calendario <- rbind(cbind(calendario[,1],calendario[,2]),cbind(calendario[,2],calendario[,1]))
+
+```
+
+Let’s initialize the team’s name(it is not mandatory but it’s useful for more interpretability) and the attack and defense parameters:
+
+```{r}
+#Parameters Initialization
+
+lista_squadre <- c(
+"Atalanta",
+"Benevento",
+"Bologna",
+"Cagliari",
+"ChievoVerona",
+"Crotone",
+"Fiorentina",
+"Genoa",
+"Hellas Verona",
+"Internazionale",
+"Juventus",
+"Lazio",
+"Milan",
+"Napoli",
+"Roma",
+"Sampdoria",
+"Sassuolo",
+"S.P.A.L.",
+"Torino",
+"Udinese"
+)
+
+#Initialization of the attack and defense parameters
+
+lista_att <- c(0.466759886, -0.078863921, -0.295752308, -0.267804478,  0.260276324, -0.062646936, -0.053926657, -0.472610353, 0.104568214, 0.539489547, 0.787309429, 0.359666450, -0.246773313, -0.202725753, -0.311150954, -0.467269373,  0.381079896, -0.055581673, -0.377069311, -0.006974717)
+
+lista_deff <- c(0.08188169,  0.20564497,  0.05743393, -0.25953356, -0.29356523,  0.11480747,  0.13061125  ,0.15279287 , 0.15869666, -0.20529833, -0.47132262 ,-0.47885590, -0.02573855,  0.13541009,  0.30368607,  0.07793350, -0.36709166,  0.27137934,  0.09550293,  0.31562510)
+
+```
+
+Initialize the Bayesian Model.
+
+```{r}
+#Parametri di inizializzazione
+
+soccer.init = list(list("home" = 0.3, "a" = c(NA,rep(0.2, 19)), "d" = c(NA,rep(0.2, 19))),list("home" = 0.7, "a" = c(NA,rep(0.2, 19)), "d" = c(NA,rep(0.2, 19))))
+
+# PARAMETERS OF INTEREST
+soccer.param = c("a", "d", "home")
+```
+
+Change the teams name.
+
+```{r}
+for(i in 1:length(lista_squadre))
+{
+  calendario[calendario==i] <- lista_squadre[i]
+}
+```
+
+And **simulate the goals, according with the Poisson distribution**, as explained before:
+
+```{r}
+set.seed(123)
+
+goal1 <- NULL
+goal2 <- NULL
+for (match in 1:nrow(calendario))
+{
+  nome1 <- calendario[match,1]
+  nome2 <- calendario[match,2]
+  pos1 <- which(lista_squadre==nome1)
+  pos2 <- which(lista_squadre==nome2)
+  l1 <- exp(0.3 + lista_att[pos1] + lista_deff[pos2])
+  l2 <- exp(lista_att[pos2] + lista_deff[pos1])
+  
+  goal1[match] <- rpois(1,l1)
+  goal2[match] <- rpois(1,l2)
+}
+  
+calendario <- cbind(calendario,goal1,goal2)
+
+calendario <- as.data.frame(calendario)
+calendario$goal1 <- as.integer(calendario$goal1)
+calendario$goal2 <- as.integer(calendario$goal2)
+
+```
+
+Let’s see some of the generated data:
+
+```{r}
+kable(head(calendario))
+```
+
+Let’s train the model:
+
+```{r}
+soccer.data = list(x = calendario$goal1, y = calendario$goal2, number_match = 380, number_teams = 20, ht = calendario$V1, at = calendario$V2)
+
+model_generate = jags(data = soccer.data, inits = soccer.init,parameters.to.save = soccer.param,     model.file = "C:/Users/user/Desktop/Tardella/model_1.txt",
+n.chains = 2, n.iter = 10000)  
+```
+
+And see the estimated parameters:
+
+```{r}
+res = cbind(model_generate$BUGSoutput$summary[1:20,1], model_generate$BUGSoutput$summary[21:40,1])
+rownames(res) <- levels(calendario$V1)
+```
+
+Now it’s possible to quantify the error made by model, using the SSE between the true parameter and the estimated one:
+
+```{r}
+# Sum of Squared Error
+
+c("The SSE made for the attack is ",sum(res[,1]-lista_att)^2)
+c("The SSE made for the defense is ",sum(res[,2]-lista_deff)^2)
+
+```
+
+As it’s possible to see **the errors are very small**. So assuming that the **data perfectly fit a Poisson distribution**, our model seems to work very well.
+
+# MODEL 2: some modification on the Prior of the Model_1
+
+Now, we consider another level in our hierarchical Bayesian model making some reasoning about what determines **the Intensity of scoring** for each team.  Instead of assuming that the coefficient *attack* and *defense* follow a Gaussian distribution with fixed parameters, we add a bit of variability to the Gaussian parameters.
+
+###Level III: Hyperpriors on the parameters
+
+The hyper-priors of the attack and defense effects are modelled independently using again flat prior distributions, as for the "Home effect" :
+
+* $\mu_{att} \sim N(0,0.0001)$
+* $\mu_{def} \sim N(0,0.0001)$
+* $\tau_{att} \sim Gamma(0.1,0.1)$
+* $\tau_{def} \sim Gamma(0.1,0.1)$
+
+A graphical representation of the model is depicted in the figure below.
+
+###DAG UPDated
+
+```{r}
+graph <- make_empty_graph(directed=T)
+graph <- graph + vertex(color= 'lightblue',name=expression(mu ["att"]))+ vertex(color= 'lightblue',name=expression(tau ["att"]))+ vertex(color= 'lightblue',name=expression(mu ["def"]))+ vertex(color= 'lightblue',name=expression(tau ["def"]))+ vertex(color= 'lightblue',name=expression("Y"["g1"]))+ vertex(color= 'lightblue',name=expression("Y"["g2"]))+ vertex(color= 'lightblue',name=expression(theta ["g1"]))+ vertex(color= 'lightblue',name=expression(theta ["g2"]))+ vertex(color= 'lightblue',name="home")+ vertex(color= 'lightblue',name=expression("att" ["h(g)"]))+ vertex(color= 'lightblue',name=expression("def" ["a(g)"]))+ vertex(color= 'lightblue',name=expression("att" ["a(g)"]))+vertex(color= 'lightblue',name=expression("def" ["h(g)"]))
+
+graph <- graph + edge(7,5)+ edge(8,6)+ edge(9,7)+ edge(10,7)+ edge(11,7)+ edge(12,8)+ edge(13,8) + edge(1,10) + edge(2,10) + edge(1,12) + edge(2,12) + edge(3,11) + edge(4,13) + edge(3,13) + edge(4,11)
+
+l <- layout_with_sugiyama(graph, layers = NULL, hgap = 1, vgap = 1,
+  maxiter = 100, weights = NULL, attributes = c("default", "all", "none"))
+
+plot(graph, layout=l$layout,edge.color='black', main="DAG for Model_2", vertex.size=20, edge.arrow.size=0.9)
+```
+
+The hierarchical nature implies a form of correlation between the observable variables $Y_{g1}$ and $Y_{g2}$ by means of the unobservable hyper-parameters $\eta = (\mu_{att}, \mu_{def} , \tau_{att}, \tau_{def} )$. In fact, the components of $\eta$ represent a **latent structure** that we assume to be common for all the games played in a season and that determines the average scoring rate.
+
+The *Jags code* is the following one:
+
+```{r eval = FALSE}
+'''
+model{
+  for (i in 1:number_match){    
+    # stochastic component
+    x[i]~dpois(lambda1[i])       
+    y[i]~dpois(lambda2[i])       
+    # link and linear predictor
+    log(lambda1[i])<-  home + a[ ht[i] ] + d[ at[i] ]
+    log(lambda2[i])<-  a[ at[i] ] + d[ ht[i] ]
+  }
+  # STZ constraints     
+  a[1]<-  -sum( a[2:20] )
+  d[1]<-  -sum( d[2:20] )
+  #
+  # prior distributions
+ 
+  home~dnorm(0,0.001)
+
+    tau.att ~ dgamma(0.01,0.01)
+    tau.def ~ dgamma(0.01,0.01)
+
+
+for (i in 1:number_teams){
+    m1[i] ~ dnorm(0,100)
+    m2[i] ~ dnorm(0,100)
+}
+
+  for (i in 2:number_teams){
+
+    a[i]~dnorm(m1[i],tau.att)
+    d[i]~dnorm(m2[i],tau.def)
+  }
+  
+}
+'''
+
+```
+
+Now we can we can load the second model:
+
+```{r}
+model_2 = jags(data = soccer.data, inits = soccer.init,        
+                parameters.to.save = soccer.param,          
+                model.file = "C:/Users/user/Desktop/Tardella/model_2.txt",
+                n.chains = 2,                         
+                n.iter = 50000,n.burnin = 25000)   
+
+```
+
+* **number of iterations**: 50000
+* **number of chains**: 2
+* **burn-in**: 25000
+* **n.thin**: 25
+
+```{r}
+mm2 <- as.mcmc(model_2)
+summary(mm2)
+```
+
+Now we can take a look about the parameters:
+
+```{r}
+off_att <- model_2$BUGSoutput$mean$a
+super_def <- model_2$BUGSoutput$mean$d
+home_sweet <- model_2$BUGSoutput$mean$home
+  
+XY <- data.frame(cbind(levels(Serie_A$HomeTeam),off_att,super_def,home_sweet))
+colnames(XY)<- c("Team","Attack","Defense","Home")
+
+kable(XY)
+```
+
+
+Observing the values we notice how the distances that were present in the first model for attack and defense are always maintained, however the values are slightly closer together, while for the *home factor* we notice a considerable increase up to 0.83.
+
+Now **it’s time to make the diagnostic** also in this model, looking at the same plot explained before:
+
+###Traceplot
+
+```{r}
+par(mfrow=c(3,2))
+par_list <- colnames(mm2[[1]])
+for (i in 1:dim(model_1$BUGSoutput$sims.array)[3])
+{
+  plot(model_2$BUGSoutput$sims.array[,1,i], type = "l", main=paste("Traceplot",par_list[i]))
+  points(model_2$BUGSoutput$sims.array[,2,i], type = "l", col=rgb(1,0,0,0.7))
+}
+par(mfrow=c(1,1))
+```
+
+###Autocorrelation
+
+```{r}
+par(mfrow=c(3,2))
+for(i in 1:dim(model_2$BUGSoutput$sims.array)[3])
+{
+  acf_main <- acf(model_2$BUGSoutput$sims.array[,1,i], plot = F, lag.max=100)
+  plot(acf_main$lag, acf_main$acf, type='h', col = 'darkorchid',  xlab="LAG", ylab="ACF", lwd=2, main=paste("Autocorrelation of ",par_list[i]))
+}
+par(mfrow=c(1,1))
+```
+
+###Density Plot
+
+```{r}
+par(mfrow=c(3,1))
+densityplot(as.mcmc(model_2),layout=c(2,6),aspect="fill" )
+par(mfrow=c(1,1))
+```
+
+###Gelman-Rubin Plot
+
+```{r}
+mm2 = as.mcmc(model_2)
+colnames(mm2[[1]])
+gelman.plot(mm2)
+```
+
+###Geweke-Broks Plot
+
+```{r}
+geweke.plot(mm2)
+```
+
+# Models comparison
+
+In order to compare the two models is needed an index known as **DIC**, which is a *penalized fit criterion* applicable to compare models.
+The **DIC** (Deviance Information Criterion) is a Bayesian criterion for model comparison, it is defined as:
+
+\[
+DIC =\bar{D}+d_e=D(\bar{\theta}) + 2d_e
+\]
+
+
+where:
+
+* $D(\theta) = -2log(L(\theta))$
+
+* $d_e = \bar{D} - D(\bar{\theta})$. It is the effective number of parameters of the model. The largest $d_e$ is, the easier it is for the model to fit the data. 
+
+* $\bar{D}= \mathbb{E}_0[D(\theta)]$. It is a measure of how well the model fit the data; the larger this is, the worse the fit.
+
+* $D(\bar{\theta})=D(\mathbb{E}(\theta))$
+
+The idea is that the models with smaller DIC should be preferred to models with larger DIC. Models are penalized both by the value of $\bar{D}$, which favors a good fit, but also by $d_e$. Since $\bar{D}$ will decrease as the number of parameters increases in the model, the $d_e$ term compensates for this effect by favoring models with a smaller number of parameters. The DIC is easily computed from samples generated by a Markov Chain Monte Carlo simulation.
+
+Now **lets evaluate the DIC** for the two models just specified:
+
+```{r}
+c("First model" = model_1$BUGSoutput$DIC, "Second model" = model_2$BUGSoutput$DIC)
+```
+
+However, **this value compares two different models, but in our case more than two models we are analyzing the same model with changes in the prior**s, so the value returned by the *DIC doesn't have much meaning*.
+
+# Frequentist analysis
+
+Let’s move to a frequentist approach. To model the goals we use a **Generalized Linear Model**, that is a flexible generalization of ordinary linear regression that allows for response variables that have error distribution models other than a normal distribution. The GLM generalizes linear regression by allowing the linear model to be related to the response variable via a link function.
+
+In the GLM model we set the family argument to Poisson since we’re modeling low and non negative numbers *(counts)*.
+Regarding the **link function**, we use the log. In fact we know that
+the $\lambda$ parameter of a Poisson, which represents the distribution of the goals making by each team, must be a value in the interval $[0,+\infty)$. 
+
+Knowing that each value of the $Y$ variable is distributed as a **Poisson**.
+The expected value depends on the independent variable $X$, which in our case represents the features about the team we are analyzing:
+
+$E(Y)=\lambda=g^{-1}(X\beta)$
+
+$X\beta$ it is the linear predictor, a linear combination of unknown parameters $\beta$,which represent the values of attack and defense of opposing teams; $g$ is the **link function**.
+
+At this point we have to choose a link function that allows to respect the parameter support $\lambda$, so that the values that will give us back the linear combination of the estimators are mapped in the same domain. 
+
+For this reason $g$ it's a logarithmic function that allows our prediction to obtain values between $(-\infty,+\infty)$ just like the codomain of the function $g(\lambda)$.
+
+
+###Frequentist Model 
+
+```{r}
+#Frequentist Model 
+
+Frequentist_model <-rbind(data.frame(goals=new_data$FTHG,team=Serie_A$HomeTeam,opponent=Serie_A$AwayTeam,home=1),data.frame(goals=new_data$FTAG,team=Serie_A$AwayTeam,opponent=Serie_A$HomeTeam,home=0)) %>%
+glm(goals ~ home + team +opponent, family=poisson(link=log),data=.)
+
+summary(Frequentist_model)
+
+```
+
+Observing the values of the coefficients, the differences between the teams with the best attacks and the teams with the best defenses are respected, the same for the teams with the two worst characteristics according to what we have obtained before in the 2 Bayesian Model. However, **we note a broad decrease in the home factor**. 
+
+In fact, if in the first two models we obtained values of 0.23 and 0.83 now in the frequentist model, it assumes a coefficient of 0.17, probably in the frequentist model the teams playing at home are not affected by the same positive effect analyzed in the Bayesian models.
+
+Now, we can make a small example about a single match, in this specific case we are analyzing *the capital Derby* between **Lazio** and **Rome**. Firstly we see the result when Rome hosts Lazio.
+
+```{r}
+#Roma - Lazio
+predict(Frequentist_model, data.frame(home=1, team="Roma", opponent="Lazio"), type="response")
+
+```
+
+While we can observe the inverse of the previous case, when Rome has to play away... but always in the same Stadium for this specific case.
+
+```{r}
+#Lazio-Roma
+predict(Frequentist_model, data.frame(home=0, team="Roma", opponent="Lazio"), type="response")
+
+```
+
+Observing the results we have obtained, we see how the first $\lambda$ parameter reflects Rome's offensive ability to score when it plays at home, while outside the home $\lambda$'s value decreases but only slightly.
+
+Here we have created a function that can **simulate the possible results** of a match using the $\lambda$ parameter returned by the frequentist model, observing the possibility of scoring a specific quantity of goals with that specific lambda, using the likelihood.
+
+```{r}
+#Function for the simulation of a match
+simulate_match <- function(modello, homeTeam, awayTeam, max_goals=10)
+  {
+    home_goals_avg <- predict(modello,data.frame(home=1, team=homeTeam, opponent=awayTeam), type="response")
+    away_goals_avg <- predict(modello, data.frame(home=0, team=awayTeam, opponent=homeTeam), type="response")
+    dpois(0:max_goals, home_goals_avg) %o% dpois(0:max_goals, away_goals_avg) 
+  }
+#Derby Simulation
+derby <- simulate_match(Frequentist_model, "Roma", "Lazio", max_goals=6)
+#Matrix of probability
+derby
+```
+
+The result we obtain is a matrix, in which the probability that the game can end with a given result. Obviously if we sum up the values on the **diagonal** we will have the probability that the match will end in a **draw** while if we add the **upper diagonal** we get the probability of victory of **Lazio** while the **lower diagonal** of **Rome**.
+
+We can conclude by looking at the results we get:
+
+```{r}
+#Observing the result
+c("Roma winning",sum(derby[lower.tri(derby)]))
+c("Draw",sum(diag(derby)))
+c("Lazio winning",sum(derby[upper.tri(derby)]))
+
+```
+
+##Prediction on the second half of the Championship
+
+We try to predict the results of the second half of the season by comparing the 3 models we have described so far.
+
+#### Bayesian Model_1
+
+```{r}
+# INITS
+soccer.init = list(list("home" = 0.7, "a" = c(NA,rep(0.2, team-1)), "d" = c(NA,rep(0.2, team-1))),list("home" = 0.7, "a" = c(NA,rep(0.2, team-1)), "d" = c(NA,rep(0.2, team-1))))
+
+# PARAMETERS OF INTEREST
+#soccer.param = c("a", "d", "home")
+soccer.param = c("a", "d", "home", "x", "y")
+
+soccer.data = list(x = c(new_data$FTHG[1:190],rep(NA,190)), y = c(new_data$FTAG[1:190],rep(NA,190)), number_match = match, number_teams = team, ht = new_data$HomeTeam, at = new_data$AwayTeam)
+```
+
+Train the first model:
+
+```{r}
+model_pred_1 = jags(data = soccer.data, inits = soccer.init, parameters.to.save = soccer.param, model.file = "C:/Users/user/Desktop/Tardella/model_1.txt", n.chains = 2, n.iter = 10000)
+```
+
+Evaluating the model for the second part of the League
+
+```{r}
+# Distribution of the HomeTeam in the last part Of the League
+pred_distro_home <- as.data.frame(model_pred_1$BUGSoutput$sims.list$x[,191:380])
+pred_distro_away <- as.data.frame(model_pred_1$BUGSoutput$sims.list$y[,191:380])
+
+gol_home_m1 <- NULL
+gol_away_m1 <- NULL
+for(i in 1:ncol(pred_distro_away))
+{
+  gol_home_m1[i] <- round(mean(pred_distro_home[,i]))
+  gol_away_m1[i] <- round(mean(pred_distro_away[,i]))
+}
+
+#gol_home_m1
+#gol_away_m1
+```
+
+#### Bayesian Model_2
+
+```{r}
+# INITS
+soccer.init = list(list("home" = 0.7, "a" = c(NA,rep(0.2, team-1)), "d" = c(NA,rep(0.2, team-1))),list("home" = 0.7, "a" = c(NA,rep(0.2, team-1)), "d" = c(NA,rep(0.2, team-1))))
+
+# PARAMETERS OF INTEREST
+#soccer.param = c("a", "d", "home")
+soccer.param = c("a", "d", "home", "x", "y")
+
+soccer.data = list(x = c(new_data$FTHG[1:190],rep(NA,190)), y = c(new_data$FTAG[1:190],rep(NA,190)), number_match = match, number_teams = team, ht = new_data$HomeTeam, at = new_data$AwayTeam)
+```
+
+Train the second model:
+
+```{r}
+model_pred_2 = jags(data = soccer.data, inits = soccer.init, parameters.to.save = soccer.param, model.file = "C:/Users/user/Desktop/Tardella/model_2.txt", n.chains = 2, n.iter = 10000)
+```
+
+Evaluating the second model 
+
+```{r}
+# Distribution of the second part of the League
+pred_distro_home <- as.data.frame(model_pred_2$BUGSoutput$sims.list$x[,191:380])
+pred_distro_away <- as.data.frame(model_pred_2$BUGSoutput$sims.list$y[,191:380])
+
+gol_home_m2 <- NULL
+gol_away_m2 <- NULL
+for(i in 1:ncol(pred_distro_away))
+{
+  gol_home_m2[i] <- round(mean(pred_distro_home[,i]))
+  gol_away_m2[i] <- round(mean(pred_distro_away[,i]))
+}
+
+#gol_home_m2
+#gol_away_m2
+```
+
+#### Frequentist Model
+
+Training the frequentist model on the first part of the League :
+
+```{r}
+Frequentist_model_3 <-rbind(data.frame(goals=new_data$FTHG[1:190],team=Serie_A$HomeTeam[1:190],opponent=Serie_A$AwayTeam[1:190],home=1),data.frame(goals=new_data$FTAG[1:190],team=Serie_A$AwayTeam[1:190],opponent=Serie_A$HomeTeam[1:190],home=0)) %>%
+glm(goals ~ home + team +opponent, family=poisson(link=log),data=.)
+
+summary(Frequentist_model_3)
+```
+
+Making the **prediction for the second part of the League**.
+
+```{r}
+Casa <- NULL
+FuoriCasa <-NULL
+Paregg <- NULL
+
+for (i in 1:190){
+  #print(as.character(Serie_A$HomeTeam[i]))
+  a<-simulate_match(Frequentist_model_3,as.character(Serie_A$HomeTeam[i+190]),as.character(Serie_A$AwayTeam[i+190]),max_goals=8)
+ Casa[i] <- sum(a[lower.tri(a)])
+Paregg[i] <- sum(diag(a))
+FuoriCasa[i] <- sum(a[upper.tri(a)])
+}
+
+```
+
+### Comparison about the 3 Models
+
+Now we can see how the 3 models predict the values about the second part of the season.
+
+```{r}
+esatto_1 <- 0
+esatto_2 <- 0
+esatto_3 <- 0
+for (i in 1:190){
+  #Model 1
+  #print(i)
+  result_1 <- cbind(gol_home_m1,gol_away_m1)
+  if (result_1[i,1] == result_1[i,2] & new_data[i+190,3]==new_data[i+190,4]){
+    esatto_1 = esatto_1+1
+  }
+  else if (which.max(result_1[i,]) == which.max(new_data[i+190,3:4])){
+    esatto_1 = esatto_1+1
+  }
+  
+  #Model 2
+  #print(i)
+  result_2 <- cbind(gol_home_m2,gol_away_m2)
+  if (result_2[i,1] == result_2[i,2] & new_data[i+190,3]==new_data[i+190,4]){
+    esatto_2 = esatto_2+1
+  }
+  else if (which.max(result_2[i,]) == which.max(new_data[i+190,3:4])){
+    esatto_2 = esatto_2+1
+  }
+  #Frequentist Model
+  frequentist <- cbind(Casa,FuoriCasa,Paregg)
+  if (new_data[i+190,3]==new_data[i+190,4]){
+    if(which.max(frequentist[i,])==3){
+      esatto_3 <- esatto_3 +1
+    }
+  }
+  else if(which.max(frequentist[i,])== which.max(new_data[i+190,3:4])){
+    esatto_3 <- esatto_3 +1
+   }
+}
+
+#Results
+
+c("Bayesian Model_1"= esatto_1/i)
+c("Bayesian Model_2"= esatto_2/i)
+c("Frequentist Model_3"= esatto_3/i)
+
+```
+
+##Betting Strategy
+
+The expected value of the net profit for a **Unit Bet** on an Event A is given by:
+
+$$EV(A)=P(A)Q(A) - 1$$
+
+where event $A$ represents the victory, the draw or the defeat of the home team,$P(A)$ is the probability assigned by our model to event $A$ and $Q(A)$ is the amount that the bookmaker is willing to pay in case of realization of the event. Suppose it is a unit of our bet for this we subtract 1. 
+
+In this case we choose a rather conservative strategy as reducing the number of games to bet on, trying to improve the quality of the bet.
+
+To reduce the risks of our bet we must follow guidelines:
+
+* Betting only on *quality bets* or events with an EV that exceeds a certain threshold $\epsilon >0$
+
+* In the event that the $EV> \epsilon$ event has an odds greater than 6.00 is considered *long shot* and therefore we will decide not to play the bet.
+
+* In the event that $EV(1)>\epsilon$ and $EV(2)>\epsilon$ occur, the event that we will play will be the one with the highest probability P estimated by the  model.
+
+Extraction of the probabilities starting from the best Bayesian model we have observed.
+
+```{r}
+match <- 380
+labda_1 <- NULL
+labda_2 <- NULL
+
+#Posterior mean of goal intesity
+for (i in 1:length(Serie_A$HomeTeam)){
+  
+  labda_1[i] <- exp(model_2$BUGSoutput$mean$home + model_2$BUGSoutput$mean$a[new_data$HomeTeam[i]] + model_2$BUGSoutput$mean$d[new_data$AwayTeam[i]])
+  
+  labda_2[i] <- exp(model_2$BUGSoutput$mean$a[new_data$AwayTeam[i]]+ model_2$BUGSoutput$mean$d[new_data$HomeTeam[i]])
+
+}
+
+prob_fin_bayesian <- matrix(NA,nrow = match, ncol=3)
+
+matrice_risultati <- matrix(NA,nrow = 7,ncol = 7)
+for (scontro in 1:length(labda_1)){
+  #print(scontro)
+  for (i in 1:nrow(matrice_risultati)){
+    for (j in 1:ncol(matrice_risultati)){
+      matrice_risultati[i,j]<- dpois(i-1,labda_1[scontro]) * dpois(j-1,labda_2[scontro])
+    }
+    
+  }
+  prob_fin_bayesian[scontro,1]<-sum(matrice_risultati[lower.tri(matrice_risultati)])
+  prob_fin_bayesian[scontro,3]<-sum(matrice_risultati[upper.tri(matrice_risultati)])
+  prob_fin_bayesian[scontro,2]<-sum(diag(matrice_risultati))
+  
+}
+
+```
+
+Now we can get the frequentist probability for every game of the season:
+
+```{r}
+prob_fin_frequentist <- matrix(NA,nrow = match, ncol=3)
+
+for (i in 1:380){
+parta <- simulate_match(Frequentist_model,Serie_A$HomeTeam[i],Serie_A$AwayTeam[i], max_goals=7)
+prob_fin_frequentist[i,1] <- sum(parta[lower.tri(parta)])
+prob_fin_frequentist[i,2] <- sum(diag(parta))
+prob_fin_frequentist[i,3] <- sum(parta[upper.tri(parta)])
+}
+```
+
+We are able to recover from our initial dataset *Serie_A* the odds of the major betting centers in the world focusing on the odds of the **BET365** agency.
+
+```{r}
+#Taking the odds
+bet365_prob<- NULL
+bet365_prob <- Serie_A[,c("B365H","B365D","B365A")]
+
+#Evaluation of the matrix using the evaluation of the Risk
+EV_bayes <- bet365_prob*prob_fin_bayesian - 1
+EV_frequ <- bet365_prob*prob_fin_frequentist - 1
+```
+
+We calculate the number of bets that will be made in the two models **trying to minimize the risk**:
+
+```{r}
+# Function for evaluatink to do or not a bet
+scommessa <- function(EV,epsilon=0.2){
+  scomm <- NULL
+  for (i in 1:nrow(EV))
+  {
+    if(max(EV[i,])>epsilon)
+    {
+      scomm[i] <- which.max(EV[i,])
+    }
+    else
+    {
+      scomm[i] <- 99
+    }
+  }
+  return (scomm)
+}
+
+##Vector in which we put our bet
+Bayes_Giocate = scommessa(EV_bayes)
+Freq_Giocate = scommessa(EV_frequ)
+```
+
+It's important to create the vector with the real value of the match with the final result, putting 1 if the HomeTeam won , 3 if the AwayTeam won and 2 if there was a Draw.
+
+```{r}
+real_result <- NULL
+
+vitt <- 0
+for (i in 1:match)
+{
+  if(new_data$FTHG[i]>new_data$FTAG[i])
+    {
+      real_result[i] <- 1
+    }
+  
+  if(new_data$FTHG[i]==new_data$FTAG[i])
+    {
+      real_result[i] <- 2
+    }
+  
+  if(new_data$FTHG[i]<new_data$FTAG[i])
+    {
+      real_result[i] <- 3
+    }
+  
+}
+```
+
+Now we can compare the betting choices made by the 2 different models:
+
+```{r}
+Vittoria_Baldoria <- function(scomm){
+  cont <- 0
+  den <- 0
+  soldi <- 0
+  for(i in 1:match)
+  {
+    if(scomm[i]!=99)
+    {
+      if(bet365_prob[i,scomm[i]]<6.5)
+      {
+        den <- den + 1
+        if(scomm[i]==real_result[i])
+          {
+            cont <- cont +1
+            soldi <- soldi + bet365_prob[i,scomm[i]]
+            #print(c(bet365_prob[i,scomm[i]],Serie_A$HomeTeam[i],Serie_A$AwayTeam[i]))
+           
+        }
+        else{
+          soldi<- soldi-1
+        }
+      }
+    }
+  }
+  #print(cont)
+  return (list("Vittorie" = cont/den,"Guadagno"=soldi))
+}
+BB<- Vittoria_Baldoria(Bayes_Giocate)
+FF <- Vittoria_Baldoria(Freq_Giocate)
+
+c("Percentage of victory with Bayesian Model",round(BB$Vittorie*100,2))
+c("Percentage of victory with Frequentist Model",round(FF$Vittorie*100,2))
+```
+
+We have trained the models on the total number of matches in a season and then predicting this championship again, so the training is composed by 380 games and the prediction by the same number. The results we get highlight how the best behaviour we get from the second model while the worst prediction turns out to be that of the model frequentist.
+
+Observing the result we see that through the Bayesian Model we have made 198 bets and guess the 29 % while for the Frequentist model we have made a lower number of bets, only 81 but the percentage of victory is equal to 32.1%.
+
+
+#Beat the House (Vittoria Baldoria)
+
+```{r}
+#Posterior mean of goal intesity
+
+labda_1_bis<- NULL
+labda_2_bis<- NULL
+
+for (i in 191:length(Serie_A$HomeTeam)){
+  
+  labda_1_bis[i-190] <- exp(model_pred_2$BUGSoutput$mean$home + model_pred_2$BUGSoutput$mean$a[new_data$HomeTeam[i]] + model_pred_2$BUGSoutput$mean$d[new_data$AwayTeam[i]])
+  
+  labda_2_bis[i-190] <- exp(model_pred_2$BUGSoutput$mean$a[new_data$AwayTeam[i]]+ model_pred_2$BUGSoutput$mean$d[new_data$HomeTeam[i]])
+
+}
+
+prob_fin_bayesian_2 <- matrix(NA,nrow = 190, ncol=3)
+
+matrice_risultati_bis <- matrix(NA,nrow = 7,ncol = 7)
+for (scontro in 1:length(labda_1_bis)){
+  #print(scontro)
+  for (i in 1:nrow(matrice_risultati_bis)){
+    for (j in 1:ncol(matrice_risultati_bis)){
+      matrice_risultati_bis[i,j]<- dpois(i-1,labda_1_bis[scontro]) * dpois(j-1,labda_2_bis[scontro])
+    }
+    
+  }
+  prob_fin_bayesian_2[scontro,1] <- sum(matrice_risultati_bis[lower.tri(matrice_risultati_bis)])
+  prob_fin_bayesian_2[scontro,3] <-sum(matrice_risultati_bis[upper.tri(matrice_risultati_bis)])
+  prob_fin_bayesian_2[scontro,2]<-sum(diag(matrice_risultati_bis))
+  
+}
+
+```
+
+Now we can get the frequentist probability for every game of the season:
+
+```{r}
+prob_fin_frequentist_2 <- matrix(NA,nrow = 190, ncol=3)
+
+for (i in 1:190){
+  #print(as.character(Serie_A$HomeTeam[i]))
+  a<-simulate_match(Frequentist_model_3,as.character(Serie_A$HomeTeam[i+190]),as.character(Serie_A$AwayTeam[i+190]),max_goals=7)
+ prob_fin_frequentist_2[i,1] <- sum(a[lower.tri(a)])
+prob_fin_frequentist_2[i,2] <- sum(diag(a))
+prob_fin_frequentist_2[i,3] <- sum(a[upper.tri(a)])
+}
+```
+
+We are able to recover from our initial dataset *Serie_A* the odds of the major betting centers in the world focusing on the odds of the **BET365** agency.
+
+```{r}
+#Taking the odds
+bet365_prob<- Serie_A[c(191:380),c("B365H","B365D","B365A")]
+row.names(bet365_prob)<- seq(1,190)
+
+#Evaluation of the matrix using the evaluation of the Risk
+EV_bayes_bis <- bet365_prob*prob_fin_bayesian_2 - 1
+EV_frequ_bis <- bet365_prob*prob_fin_frequentist_2 - 1
+```
+
+We calculate the number of bets that will be made in the two models **trying to minimize the risk**:
+
+```{r}
+# Function for evaluatink to do or not a bet
+scommessa <- function(EV,epsilon=0.2){
+  scomm <- NULL
+  for (i in 1:nrow(EV))
+  {
+    if(max(EV[i,])>epsilon)
+    {
+      scomm[i] <- which.max(EV[i,])
+    }
+    else
+    {
+      scomm[i] <- 99
+    }
+  }
+  return (scomm)
+}
+
+##Vector in which we put our bet
+Bayes_Giocate_bis = scommessa(EV_bayes_bis)
+Freq_Giocate_bis = scommessa(EV_frequ_bis)
+```
+
+It's important to create the vector with the real value of the match with the final result, putting 1 if the HomeTeam won , 3 if the AwayTeam won and 2 if there was a Draw.
+
+```{r}
+real_result_bis <- NULL
+
+vitt <- 0
+for (i in 191:match)
+{
+  if(new_data$FTHG[i]>new_data$FTAG[i])
+    {
+      real_result_bis[i-190] <- 1
+    }
+  
+  if(new_data$FTHG[i]==new_data$FTAG[i])
+    {
+      real_result_bis[i-190] <- 2
+    }
+  
+  if(new_data$FTHG[i]<new_data$FTAG[i])
+    {
+      real_result_bis[i-190] <- 3
+    }
+  
+}
+```
+
+Now we can compare the betting choices made by the 2 different models:
+
+```{r}
+Vittoria_Baldoria <- function(scomm){
+  cont <- 0
+  den <- 0
+  soldi <- 0
+  for(i in 1:190)
+  {
+    if(scomm[i]!=99)
+    {
+      if(bet365_prob[i,scomm[i]]<6.5)
+      {
+        den <- den + 1
+        if(scomm[i]==real_result[i])
+          {
+            cont <- cont +1
+            soldi <- soldi + bet365_prob[i,scomm[i]]
+            #print(c(bet365_prob[i,scomm[i]],Serie_A$HomeTeam[i],Serie_A$AwayTeam[i]))
+           
+        }
+        else{
+          soldi<- soldi-1
+        }
+      }
+    }
+  }
+  #print(den)
+  return (list("Vittorie" = cont/den,"Guadagno"=soldi))
+}
+
+```
+
+Now we are able to calculate which of the two models in percentage has guessed more plays and which has brought the greatest gain.
+
+```{r}
+#Observing the match in our bet and its odds
+BB_bis<- Vittoria_Baldoria(Bayes_Giocate_bis)
+FF_bis <- Vittoria_Baldoria(Freq_Giocate_bis)
+
+c("Percentage of victory with Bayesian Model",round(BB_bis$Vittorie*100,2))
+c("Percentage of victory with Frequentist Model",round(FF_bis$Vittorie*100,2))
+
+BB_bis$Guadagno
+
+FF_bis$Guadagno
+```
+
+We have trained the models on the half of the season and then predicting the second half, so the training is composed by 190 games and the prediction by the last 190 games. The results we get highlight how the best behavior we get from the second model while the worst prediction turns out to be that of the model frequentist.
+
+
+Finally in this last simulation of the results we can observe the number of matches played and the relative percentage of victory quantified in money. As for the Bayesiano model we play 65 games, blurring the result of 35.3% of these, with regard to the frequentist model we play 74 games guessing the result of 35.1%. The overall gain for the two models is, *+31.66 euros* for the **Bayesian model** and *29.07 euros* for the **Frequentist model**.
+
+# References
+
+
+* Baio, G. & Blangiardo, M. (2010), “Bayesian hierarchical models for the prediction of football results”,Journal of applied statistics 37, 253-264.
+
+* Karlis, D. & Ntzoufras, I. (2003), “Analysis of sports data by using bivariate Poisson models”, Journal of the Royal Statistical Society D 52, 381–393.
+
+* Koopman, S.J., Lit, R., (2015), “A dynamic bivariate Poisson model for analysing and forecasting match results in the English Premier League”, Journal of Royal Statistical Society A, 178, pp. 167-186.
+
+* Maher, M. J. (1982), “Modelling association football scores”, Statist. Neerland., 36, 109–118.
+
+* Pollard, R. (2008), “Home advantage in football: a current review of an unsolved puzzle”, Open Sports Scientiﬁc Journal, 1, 12–14.
+
+* Pollard, R., Benjamin, P. & Reep, C. (1977), “Sport and the negative binomial distribution”, in S. Ladany & R. Machol, eds, “Optimal Strategies in Sports”, North Holland, New York, NY, pp. 188–195.
+
+
+
+
+
+
+
